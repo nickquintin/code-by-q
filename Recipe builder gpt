@@ -1,0 +1,30 @@
+from openai import OpenAI
+
+client = OpenAI()
+
+user_profile = {}
+user_profile["dietary_restrictions"] = "gluten free, vegan"
+user_profile["cuisine_preferences"] = "japanese, peruvian"
+user_profile["ingredients_available"] = "mahi mahi,rice, soy sauce, onions, tomatoes, garlic"
+
+system_prompt = {
+  'role': 'system',
+  'content': 'Create HTML code for a recipe blog that takes into account specific dietary restrictions, chosen cuisine type and provided list of ingredients'
+}
+
+user_content1 = f"I want to create a recipe blog post here are my dietry restrictions:\n{user_profile['dietary_restrictions']}"
+user_content2 = f"Please provide blog post with a title, description, ingredients and instructions. Format the ingredients and isntructinos as follows: Ingredients should be bulleted and instrucitons should be numbered"
+user_content3 = f"Recipe should use only use ingredients listed in user profile and standard pantry items the output should be limited to a single blog post and should not exceed six steps"
+
+user_prompt = {
+  'role': 'user',
+  'content': user_content1 + '\n' + user_content2 + '\n' + user_content3
+}
+
+response = client.chat.completions.create(
+  model = 'gpt-3.5-turbo',
+  messages = [system_prompt, user_prompt]
+)
+
+#output code
+print(response.choices[0].message.content)
