@@ -1,0 +1,104 @@
+import os
+import openai
+import gspread
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from dotenv import load_dotenv
+
+# Load OpenAI API key
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# --- GOOGLE AUTH SETUP ---
+SCOPES = [
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/spreadsheets"
+]
+creds = Credentials.from_service_account_file(
+    "/Users/katehandley/desktop/JobAutomationProject/credentials.json", scopes=SCOPES
+)
+
+# Google Sheets
+sheet_client = gspread.authorize(creds)
+sheet = sheet_client.open_by_key("1WLX3ZybtidtTMmTae9Vbe0ohDBscL_B3R6Ln15X9cVU").sheet1
+
+# Google Docs and Drive
+docs_service = build("docs", "v1", credentials=creds)
+drive_service = build("drive", "v3", credentials=creds)
+
+# --- LOAD BASE COVER LETTER ---
+with open("/Users/katehandley/desktop/JobAutomationProject/GoogleCL.txt", "r") as f:
+    base_cover_letter = f.read()
+
+# --- PROCESS EACH ROW ---
+rows = sheet.get_all_records()
+for i, row in enumerate(rows, start=2):  # Start at 2 for header offset
+    company = row["Company Name"]
+    job_description = row["Job Description"]
+    existing_cv = row.get("CV", "")
+
+    if existing_cv:
+        continue  # Skip if CV already exists
+
+    # --- GENERATE CUSTOM LETTER WITH OPENAI ---
+    prompt = f"""
+    Customize this base cover letter for the following company and job description:
+
+    Company: {company}
+    Job Description: {job_description}
+
+    Base Cover Letter:
+    {base_cover_letter}
+    """
+
+    client = openai.OpenAI()
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+    )
+
+    custom_letter = response.choices[0].message.content
+
+    # --- CREATE NEW GOOGLE DOC ---
+    doc_title = f"{company}CL"  # Save as CompanyNameCL
+    doc = drive_service.files().create(
+        body={
+            "name": doc_title,
+            "mimeType": "application/vnd.google-apps.document",
+            # "parents": ["your-folder-id-here"]  # Optional: move to folder
+        },
+        fields="id"
+    ).execute()
+    doc_id = doc["id"]
+
+    # --- INSERT TEXT INTO GOOGLE DOC ---
+    docs_service.documents().batchUpdate(
+        documentId=doc_id,
+        body={
+            "requests": [
+                {
+                    "insertText": {
+                        "location": {"index": 1},
+                        "text": custom_letter
+                    }
+                }
+            ]
+        }
+    ).execute()
+
+    # --- SHARE THE FILE WITH YOUR GOOGLE ACCOUNT ---
+    drive_service.permissions().create(
+        fileId=doc_id,
+        body={
+            "type": "user",
+            "role": "writer",
+            "emailAddress": "nickquintinii@gmail.com"
+        },
+        sendNotificationEmail=True
+    ).execute()
+
+    # --- UPDATE GOOGLE SHEET WITH DOC LINK ---
+    doc_link = f"https://docs.google.com/document/d/{doc_id}/edit"
+    sheet.update_cell(i, list(row.keys()).index("CV") + 1, doc_link)
